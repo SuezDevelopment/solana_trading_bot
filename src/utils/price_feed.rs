@@ -1,6 +1,7 @@
 use reqwest::Client;
 use serde::Deserialize;
 use std::env;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 use crate::utils::telegram::TelegramBot;
 
 #[derive(Deserialize)]
@@ -34,12 +35,29 @@ pub async fn get_price(token_mint: &str, vs_token: &str, telegram: &TelegramBot)
     Ok(price)
 }
 
-pub async fn monitor_new_pools(telegram: &TelegramBot) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let client = Client::new();
-    let response = client.get(env::var("RAYDIUM_POOL_API")?).send().await?.json::<Vec<RaydiumPool>>().await?;
-    let pools: Vec<String> = response.into_iter().map(|pool| pool.id).collect();
-    telegram
-        .send_message(&format!("Detected {} new pools", pools.len()))
-        .await?;
-    Ok(pools)
+pub async fn monitor_new_pools(telegram: &TelegramBot, tx: tokio::sync::mpsc::Sender<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let ws_url = env::var("RPC_WEBSOCKET")?;
+    let (mut ws_stream, _) = connect_async(&ws_url).await?;
+    // Subscribe to Raydium pool creation events (simplified; requires specific subscription)
+    ws_stream.send(Message::Text(r#"{"method":"subscribe","params":{"accounts":["RaydiumProgramId"]}}"#.to_string())).await?;
+
+    while let Some(message) = ws_stream.next().await {
+        match message? {
+            Message::Text(data) => {
+                // Parse WebSocket data for new pools (assumes Raydium event format)
+                let pool_id = parse_pool_id(&data).unwrap_or_default();
+                if !pool_id.is_empty() {
+                    telegram.send_message(&format!("Detected new pool: {}", pool_id)).await?;
+                    tx.send(pool_id).await?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn parse_pool_id(data: &str) -> Option<String> {
+    // Implement parsing logic based on Raydium WebSocket event format
+    Some("NEW_POOL_ID".to_string())
 }

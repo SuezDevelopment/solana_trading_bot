@@ -39,7 +39,7 @@ impl Grid {
                     accounts: vec![],
                     data: vec![],
                 };
-                self.wallet.send_transaction(instruction).await?;
+                self.wallet.send_transaction(instruction, &self.token_mint, "buy", level, self.amount_per_order).await?;
                 self.telegram
                     .send_message(&format!("Placed buy order for {} at {}", self.token_mint, level))
                     .await?;
@@ -49,7 +49,7 @@ impl Grid {
                     accounts: vec![],
                     data: vec![],
                 };
-                self.wallet.send_transaction(instruction).await?;
+                self.wallet.send_transaction(instruction, &self.token_mint, "sell", level, self.amount_per_order).await?;
                 self.telegram
                     .send_message(&format!("Placed sell order for {} at {}", self.token_mint, level))
                     .await?;
@@ -73,5 +73,15 @@ impl Grid {
             }
         });
         Ok(())
+    }
+
+    pub fn clone(&self) -> Self {
+        Grid {
+            wallet: self.wallet.clone(),
+            telegram: TelegramBot::new(),
+            token_mint: self.token_mint.clone(),
+            grid_levels: self.grid_levels.clone(),
+            amount_per_order: self.amount_per_order,
+        }
     }
 }

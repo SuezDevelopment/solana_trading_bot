@@ -6,24 +6,25 @@ use solana_sdk::{
 };
 use solana_client::rpc_client::RpcClient;
 use std::env;
-use crate::utils::telegram::TelegramBot;
+use crate::utils::{telegram::TelegramBot, trade_log::TradeLog};
 
 pub struct Wallet {
     keypair: Keypair,
     client: RpcClient,
     telegram: TelegramBot,
+    trade_log: TradeLog,
 }
 
 impl Wallet {
-    pub fn new(telegram: TelegramBot) -> Self {
+    pub fn new(telegram: TelegramBot, trade_log: TradeLog) -> Self {
         let private_key = env::var("WALLET_PRIVATE_KEY").expect("Missing WALLET_PRIVATE_KEY");
         let keypair = Keypair::from_base58_string(&private_key);
         let rpc_url = env::var("RPC_ENDPOINT").expect("Missing RPC_ENDPOINT");
         let client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
-        Wallet { keypair, client, telegram }
+        Wallet { keypair, client, telegram, trade_log }
     }
 
-    pub async fn send_transaction(&self, instruction: solana_sdk::instruction::Instruction) -> Result<String, Box<dyn std::error::Error>> {
+    pub async fn send_transaction(&self, instruction: solana_sdk::instruction::Instruction, token_mint: &str, action: &str, price: f64, amount: f64) -> Result<String, Box<dyn std::error::Error>> {
         let recent_blockhash = self.client.get_latest_blockhash()?;
         let tx = Transaction::new_signed_with_payer(
             &[instruction],
@@ -33,8 +34,9 @@ impl Wallet {
         );
         let signature = self.client.send_and_confirm_transaction(&tx)?;
         self.telegram
-            .send_message(&format!("Transaction sent: {}", signature))
+            .send_message(&format!("{} {} {} tokens at {} SOL (Tx: {})", action, token_mint, amount, price, signature))
             .await?;
+        self.trade_log.log_trade(token_mint, action, price, amount)?;
         Ok(signature.to_string())
     }
 
@@ -61,6 +63,7 @@ impl Wallet {
                 CommitmentConfig::confirmed(),
             ),
             telegram: TelegramBot::new(),
+            trade_log: TradeLog::new().unwrap(),
         }
     }
 }

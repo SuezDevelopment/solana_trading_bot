@@ -2,7 +2,7 @@ mod utils;
 mod strategies;
 
 use strategies::{sniper::Sniper, grid::Grid, trend::Trend};
-use utils::{wallet::Wallet, telegram::{TelegramBot, BotCommand}};
+use utils::{wallet::Wallet, telegram::{TelegramBot, BotCommand}, trade_log::TradeLog, price_feed};
 use tokio::sync::mpsc;
 use std::collections::HashMap;
 
@@ -10,14 +10,16 @@ use std::collections::HashMap;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let telegram = TelegramBot::new();
-    let wallet = Wallet::new(telegram.clone());
+    let trade_log = TradeLog::new()?;
+    let wallet = Wallet::new(telegram.clone(), trade_log.clone());
     let tokens = vec![
         "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string(), // BONK
         "EKpQGSJtjMFqKZ9u4uhkkR3eFfrk7unuZHKtvsH7BVvb".to_string(), // WIF
-        "SOL...".to_string(),
+        "So11111111111111111111111111111111111111112".to_string(), // SOL
     ];
 
     let (tx, mut rx) = mpsc::channel::<BotCommand>(100);
+    let (pool_tx, pool_rx) = mpsc::channel::<String>(100);
     let mut strategies: HashMap<String, (Sniper, Grid, Trend)> = HashMap::new();
     let mut active_tokens: Vec<String> = vec![];
 
@@ -38,9 +40,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Start Telegram bot
     tokio::spawn(async move {
-        telegram.start(tx).await;
+        price_feed::monitor_new_pools(&telegram, pool_tx).await.unwrap();
     });
 
     // Handle commands
@@ -50,10 +51,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if tokens.contains(&token) && !active_tokens.contains(&token) {
                     active_tokens.push(token.clone());
                     let (sniper, grid, trend) = strategies.get(&token).unwrap();
+                    let pool_rx_sniper = pool_rx.clone();
                     tokio::spawn({
                         let token = token.clone();
                         let sniper = sniper.clone();
-                        async move { sniper.start(token).await.unwrap() }
+                        async move { sniper.start(token, pool_rx_sniper).await.unwrap() }
                     });
                     tokio::spawn({
                         let token = token.clone();
@@ -109,6 +111,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if let Ok(threshold) = value.parse::<f64>() {
                                     trend.set_rsi_threshold(threshold);
                                 }
+                            } else if key == "use_ai" {
+                                if let Ok(use_ai) = value.parse::<bool>() {
+                                    trend.set_use_ai(use_ai);
+                                }
                             }
                         }
                         _ => {
@@ -116,6 +122,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+            }
+            BotCommand::Profit(token) => {
+                let current_price = price_feed::get_price(&token, "SOL", &telegram).await?;
+                let (profit, percentage) = trade_log.calculate_profit(&token, current_price)?;
+                telegram
+                    .send_message(&format!(
+                        "Profit for {}: ${:.2} ({:.2}%)",
+                        token, profit, percentage
+                    ))
+                    .await?;
             }
         }
     }

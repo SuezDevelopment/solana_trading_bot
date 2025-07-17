@@ -48,16 +48,12 @@ impl StopLoss {
     async fn sell(&self) -> Result<(), Box<dyn std::error::Error>> {
         let balance = self.wallet.get_balance(&self.token_mint).await?;
         if balance > 0.0 {
-            // Placeholder: Replace with Jupiter/Raydium swap instruction
             let instruction = Instruction {
                 program_id: solana_sdk::pubkey::Pubkey::from_str("RAY...").unwrap(),
                 accounts: vec![],
                 data: vec![],
             };
-            self.wallet.send_transaction(instruction).await?;
-            self.telegram
-                .send_message(&format!("Sold {} tokens for {}", balance, self.token_mint))
-                .await?;
+            self.wallet.send_transaction(instruction, &self.token_mint, "sell", get_price(&self.token_mint, "SOL", &self.telegram).await?, balance).await?;
         }
         Ok(())
     }

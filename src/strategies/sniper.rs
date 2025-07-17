@@ -26,45 +26,44 @@ impl Sniper {
             .await.unwrap();
     }
 
-    pub async fn start(&self, token_mint: String) -> Result<(), Box<dyn std::error::Error>> {
-        let pools = monitor_new_pools(&self.telegram).await?;
-        if pools.contains(&token_mint) {
-            let price = get_price(&token_mint, "SOL", &self.telegram).await?;
-            // Placeholder: Replace with Raydium swap instruction
-            let instruction = Instruction {
-                program_id: solana_sdk::pubkey::Pubkey::from_str("RAY...").unwrap(),
-                accounts: vec![],
-                data: vec![],
-            };
-            self.wallet.send_transaction(instruction).await?;
-            self.telegram
-                .send_message(&format!("Sniped {} at {}", token_mint, price))
-                .await?;
+     pub async fn start(&self, token_mint: String, pool_rx: tokio::sync::mpsc::Receiver<String>) -> Result<(), Box<dyn std::error::Error>> {
+        let mut rx = pool_rx;
+        while let Some(pool_id) = rx.recv().await {
+            if pool_id == token_mint {
+                let price = get_price(&token_mint, "SOL", &self.telegram).await?;
+                let instruction = Instruction {
+                    program_id: solana_sdk::pubkey::Pubkey::from_str("RAY...").unwrap(),
+                    accounts: vec![],
+                    data: vec![],
+                };
+                self.wallet.send_transaction(instruction, &token_mint, "buy", price, 1000.0).await?;
+                self.telegram
+                    .send_message(&format!("Sniped {} at {}", token_mint, price))
+                    .await?;
 
-            // Check profit target
-            let profit_price = price * (1.0 + self.profit_target);
-            if get_price(&token_mint, "SOL", &self.telegram).await? >= profit_price {
-                self.sell(&token_mint, price).await?;
-                return Ok(());
-            }
-
-            // Start stop-loss
-            let stop_loss = StopLoss::new(
-                token_mint.clone(),
-                price,
-                0.05,
-                0.05,
-                self.wallet.clone(),
-                self.telegram.clone(),
-            );
-            tokio::spawn(async move {
-                loop {
-                    if stop_loss.check().await.unwrap() {
-                        break;
-                    }
-                    sleep(Duration::from_secs(60)).await;
+                let profit_price = price * (1.0 + self.profit_target);
+                if get_price(&token_mint, "SOL", &self.telegram).await? >= profit_price {
+                    self.sell(&token_mint, profit_price).await?;
+                    return Ok(());
                 }
-            });
+
+                let stop_loss = StopLoss::new(
+                    token_mint.clone(),
+                    price,
+                    0.05,
+                    0.05,
+                    self.wallet.clone(),
+                    self.telegram.clone(),
+                );
+                tokio::spawn(async move {
+                    loop {
+                        if stop_loss.check().await.unwrap() {
+                            break;
+                        }
+                        sleep(Duration::from_secs(60)).await;
+                    }
+                });
+            }
         }
         Ok(())
     }
@@ -75,10 +74,18 @@ impl Sniper {
             accounts: vec![],
             data: vec![],
         };
-        self.wallet.send_transaction(instruction).await?;
+        self.wallet.send_transaction(instruction, token_mint, "sell", price, 1000.0).await?;
         self.telegram
             .send_message(&format!("Sold {} at profit target: {}", token_mint, price))
             .await?;
         Ok(())
+    }
+
+     pub fn clone(&self) -> Self {
+        Sniper {
+            wallet: self.wallet.clone(),
+            telegram: TelegramBot::new(),
+            profit_target: self.profit_target,
+        }
     }
 }
