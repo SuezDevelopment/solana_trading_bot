@@ -1,8 +1,8 @@
-use crate::utils::{wallet::Wallet, price_feed::{get_price, monitor_new_pools}};
+use crate::utils::{ wallet::Wallet, price_feed::{ get_price, monitor_new_pools } };
 use crate::strategies::stop_loss::StopLoss;
 use crate::utils::telegram::TelegramBot;
 use solana_sdk::instruction::Instruction;
-use tokio::time::{sleep, Duration};
+use tokio::time::{ sleep, Duration };
 
 pub struct Sniper {
     wallet: Wallet,
@@ -19,14 +19,22 @@ impl Sniper {
         }
     }
 
-    pub fn set_profit_target(&mut self, target: f64) {
+    pub async fn set_profit_target(
+        &mut self,
+        target: f64
+    ) -> Result<(), Box<dyn std::error::Error>> {
         self.profit_target = target;
-        self.telegram
-            .send_message(&format!("Set sniper profit target to {}%", target * 100.0))
-            .await.unwrap();
+        self.telegram.send_message(
+            &format!("Set sniper profit target to {}%", target * 100.0)
+        ).await?;
+        Ok(())
     }
 
-     pub async fn start(&self, token_mint: String, pool_rx: tokio::sync::mpsc::Receiver<String>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(
+        &self,
+        token_mint: String,
+        pool_rx: tokio::sync::mpsc::Receiver<String>
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut rx = pool_rx;
         while let Some(pool_id) = rx.recv().await {
             if pool_id == token_mint {
@@ -37,9 +45,7 @@ impl Sniper {
                     data: vec![],
                 };
                 self.wallet.send_transaction(instruction, &token_mint, "buy", price, 1000.0).await?;
-                self.telegram
-                    .send_message(&format!("Sniped {} at {}", token_mint, price))
-                    .await?;
+                self.telegram.send_message(&format!("Sniped {} at {}", token_mint, price)).await?;
 
                 let profit_price = price * (1.0 + self.profit_target);
                 if get_price(&token_mint, "SOL", &self.telegram).await? >= profit_price {
@@ -53,7 +59,7 @@ impl Sniper {
                     0.05,
                     0.05,
                     self.wallet.clone(),
-                    self.telegram.clone(),
+                    self.telegram.clone()
                 );
                 tokio::spawn(async move {
                     loop {
@@ -75,13 +81,13 @@ impl Sniper {
             data: vec![],
         };
         self.wallet.send_transaction(instruction, token_mint, "sell", price, 1000.0).await?;
-        self.telegram
-            .send_message(&format!("Sold {} at profit target: {}", token_mint, price))
-            .await?;
+        self.telegram.send_message(
+            &format!("Sold {} at profit target: {}", token_mint, price)
+        ).await?;
         Ok(())
     }
 
-     pub fn clone(&self) -> Self {
+    pub fn clone(&self) -> Self {
         Sniper {
             wallet: self.wallet.clone(),
             telegram: TelegramBot::new(),

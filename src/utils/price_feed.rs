@@ -4,6 +4,13 @@ use std::env;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use crate::utils::telegram::TelegramBot;
 
+use lazy_static::lazy_static;
+use std::sync::Mutex;
+
+lazy_static! {
+    static ref POOL_CACHE: Mutex<HashMap<String, PoolInfo>> = Mutex::new(HashMap::new());
+}
+
 #[derive(Deserialize)]
 struct JupiterQuote {
     data: Vec<QuoteData>,
@@ -18,6 +25,18 @@ struct QuoteData {
 struct RaydiumPool {
     id: String,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct PoolInfo {
+    pub id: String,
+    pub base_mint: String,
+    pub quote_mint: String,
+    pub base_vault: String,
+    pub quote_vault: String,
+    pub market_id: String,
+}
+
+
 
 pub async fn get_price(token_mint: &str, vs_token: &str, telegram: &TelegramBot) -> Result<f64, Box<dyn std::error::Error>> {
     let client = Client::new();
@@ -58,6 +77,51 @@ pub async fn monitor_new_pools(telegram: &TelegramBot, tx: tokio::sync::mpsc::Se
 }
 
 fn parse_pool_id(data: &str) -> Option<String> {
-    // Implement parsing logic based on Raydium WebSocket event format
-    Some("NEW_POOL_ID".to_string())
+    serde_json::from_str::<serde_json::Value>(data)
+        .ok()
+        .and_then(|v| v["result"]["value"]["pubkey"].as_str().map(String::from))
+}
+
+
+pub async fn get_pool_keys(
+    token_mint: &str,
+    vs_token: &str,
+    telegram: &TelegramBot,
+) -> Result<PoolInfo, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let url = env::var("RAYDIUM_POOL_API").map_err(|_| "Missing RAYDIUM_POOL_API in .env")?;
+    
+    let response = client
+        .get(&url)
+        .header("User-Agent", "SolanaTradingBot/0.1")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch pool data: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_msg = format!("Error fetching pool data: HTTP {}", response.status());
+        telegram.send_message(&error_msg).await?;
+        return Err(error_msg.into());
+    }
+
+    let pools: Vec<PoolInfo> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse pool data: {}", e))?;
+
+    let pool = pools
+        .into_iter()
+        .find(|p| {
+            (p.base_mint == token_mint && p.quote_mint == vs_token) ||
+            (p.base_mint == vs_token && p.quote_mint == token_mint)
+        })
+        .ok_or_else(|| {
+            format!("No pool found for {}/{}", token_mint, vs_token)
+        })?;
+
+    telegram
+        .send_message(&format!("Found pool for {}/{}: {}", token_mint, vs_token, pool.id))
+        .await?;
+
+    Ok(pool)
 }

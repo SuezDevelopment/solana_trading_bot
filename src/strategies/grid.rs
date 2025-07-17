@@ -45,7 +45,7 @@ impl Grid {
                     .await?;
             } else if current_price >= level {
                 let instruction = Instruction {
-                    program_id: solana_sdk::pubkey::Pubkey::from_str("RAY...").unwrap(),
+                    program_id: solana_sdk::pubkey::Pubkey::from_str_const("RAY...").unwrap(),
                     accounts: vec![],
                     data: vec![],
                 };

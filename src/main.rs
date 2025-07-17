@@ -13,6 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let trade_log = TradeLog::new()?;
     let wallet = Wallet::new(telegram.clone(), trade_log.clone());
     let tokens = vec![
+        "A3eME5Ceth4uKS29V4a3eS7Znx2H99v3Hkw3M49eN7jR".to_string(), // PENG
         "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string(), // BONK
         "EKpQGSJtjMFqKZ9u4uhkkR3eFfrk7unuZHKtvsH7BVvb".to_string(), // WIF
         "So11111111111111111111111111111111111111112".to_string(), // SOL
